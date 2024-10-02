@@ -9,7 +9,13 @@ import { Separator } from "@/components/ui/separator";
 import Authenticate from "@/components/authenticate";
 import { Button } from "@/components/ui/button";
 import { removeBackground } from "@imgly/background-removal";
-import { PlusIcon, ReloadIcon, ImageIcon } from "@radix-ui/react-icons";
+import {
+  PlusIcon,
+  ReloadIcon,
+  ImageIcon,
+  TrashIcon,
+  CopyIcon,
+} from "@radix-ui/react-icons";
 import TextCustomizer from "@/components/editor/text-customizer";
 import Image from "next/image";
 import {
@@ -30,7 +36,9 @@ interface OverlayImageControls {
 const OverlayImageCustomizer: React.FC<{
   controls: OverlayImageControls;
   onChange: (newControls: Partial<OverlayImageControls>) => void;
-}> = ({ controls, onChange }) => {
+  onDelete: () => void;
+  onDuplicate: () => void;
+}> = ({ controls, onChange, onDelete, onDuplicate }) => {
   return (
     <AccordionItem value="overlay-image">
       <AccordionTrigger>Overlay Image Controls</AccordionTrigger>
@@ -78,6 +86,14 @@ const OverlayImageCustomizer: React.FC<{
               onChange={(e) => onChange({ scale: Number(e.target.value) })}
             />
           </div>
+          <div className="flex justify-between mt-4">
+            <Button variant="destructive" size="sm" onClick={onDelete}>
+              <TrashIcon className="mr-2" /> Delete
+            </Button>
+            <Button variant="outline" size="sm" onClick={onDuplicate}>
+              <CopyIcon className="mr-2" /> Duplicate
+            </Button>
+          </div>
         </div>
       </AccordionContent>
     </AccordionItem>
@@ -93,13 +109,14 @@ const Page = () => {
     null
   );
   const [textSets, setTextSets] = useState<Array<any>>([]);
-  const [overlayImage, setOverlayImage] = useState<string | null>(null);
-  const [overlayControls, setOverlayControls] = useState<OverlayImageControls>({
-    x: 50,
-    y: 50,
-    opacity: 1,
-    scale: 1,
-  });
+  const [overlayImages, setOverlayImages] = useState<
+    Array<{
+      id: number;
+      imageUrl: string;
+      controls: OverlayImageControls;
+    }>
+  >([]);
+  const [isOverlayLoading, setIsOverlayLoading] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayInputRef = useRef<HTMLInputElement>(null);
@@ -174,20 +191,65 @@ const Page = () => {
     }
   };
 
-  const handleOverlayFileChange = (
+  const handleOverlayFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (file) {
-      const imageUrl = URL.createObjectURL(file);
-      setOverlayImage(imageUrl);
+      setIsOverlayLoading(true);
+      try {
+        const imageUrl = URL.createObjectURL(file);
+        const removedBgBlob = await removeBackground(imageUrl, {
+          output: {
+            quality: 1,
+          },
+        });
+        const removedBgUrl = URL.createObjectURL(removedBgBlob);
+        const newId = Math.max(0, ...overlayImages.map((img) => img.id)) + 1;
+        setOverlayImages((prev) => [
+          ...prev,
+          {
+            id: newId,
+            imageUrl: removedBgUrl,
+            controls: {
+              x: 50,
+              y: 50,
+              opacity: 1,
+              scale: 1,
+            },
+          },
+        ]);
+      } catch (error) {
+        console.error("Error removing background from overlay image:", error);
+      } finally {
+        setIsOverlayLoading(false);
+      }
     }
   };
 
   const handleOverlayControlsChange = (
+    id: number,
     newControls: Partial<OverlayImageControls>
   ) => {
-    setOverlayControls((prev) => ({ ...prev, ...newControls }));
+    setOverlayImages((prev) =>
+      prev.map((img) =>
+        img.id === id
+          ? { ...img, controls: { ...img.controls, ...newControls } }
+          : img
+      )
+    );
+  };
+
+  const deleteOverlayImage = (id: number) => {
+    setOverlayImages((prev) => prev.filter((img) => img.id !== id));
+  };
+
+  const duplicateOverlayImage = (id: number) => {
+    const imageToDuplicate = overlayImages.find((img) => img.id === id);
+    if (imageToDuplicate) {
+      const newId = Math.max(0, ...overlayImages.map((img) => img.id)) + 1;
+      setOverlayImages((prev) => [...prev, { ...imageToDuplicate, id: newId }]);
+    }
   };
 
   const saveCompositeImage = () => {
@@ -226,50 +288,37 @@ const Page = () => {
         ctx.restore(); // Restore the original state
       });
 
-      if (overlayImage) {
+      // Draw all overlay images
+      overlayImages.forEach(({ imageUrl, controls }) => {
         const overlayImg = new (window as any).Image();
         overlayImg.crossOrigin = "anonymous";
         overlayImg.onload = () => {
           const aspectRatio = overlayImg.width / overlayImg.height;
           const baseWidth = canvas.width * 0.5;
           const baseHeight = baseWidth / aspectRatio;
-          const width = baseWidth * overlayControls.scale;
-          const height = baseHeight * overlayControls.scale;
+          const width = baseWidth * controls.scale;
+          const height = baseHeight * controls.scale;
 
-          const x = (canvas.width * overlayControls.x) / 100 - width / 2;
-          const y = (canvas.height * overlayControls.y) / 100 - height / 2;
+          const x = (canvas.width * controls.x) / 100 - width / 2;
+          const y = (canvas.height * controls.y) / 100 - height / 2;
 
-          ctx.globalAlpha = overlayControls.opacity;
+          ctx.globalAlpha = controls.opacity;
           ctx.drawImage(overlayImg, x, y, width, height);
           ctx.globalAlpha = 1;
-
-          // Continue with background removal and download
-          if (removedBgImageUrl) {
-            const removedBgImg = new (window as any).Image();
-            removedBgImg.crossOrigin = "anonymous";
-            removedBgImg.onload = () => {
-              ctx.drawImage(removedBgImg, 0, 0, canvas.width, canvas.height);
-              triggerDownload();
-            };
-            removedBgImg.src = removedBgImageUrl;
-          } else {
-            triggerDownload();
-          }
         };
-        overlayImg.src = overlayImage;
-      } else {
-        // If no overlay image, continue with existing flow
-        if (removedBgImageUrl) {
-          const removedBgImg = new (window as any).Image();
-          removedBgImg.crossOrigin = "anonymous";
-          removedBgImg.onload = () => {
-            ctx.drawImage(removedBgImg, 0, 0, canvas.width, canvas.height);
-            triggerDownload();
-          };
-          removedBgImg.src = removedBgImageUrl;
-        } else {
+        overlayImg.src = imageUrl;
+      });
+
+      if (removedBgImageUrl) {
+        const removedBgImg = new (window as any).Image();
+        removedBgImg.crossOrigin = "anonymous";
+        removedBgImg.onload = () => {
+          ctx.drawImage(removedBgImg, 0, 0, canvas.width, canvas.height);
           triggerDownload();
-        }
+        };
+        removedBgImg.src = removedBgImageUrl;
+      } else {
+        triggerDownload();
       }
     };
     bgImg.src = selectedImage || "";
@@ -289,7 +338,9 @@ const Page = () => {
       <div className="flex flex-col min-h-screen">
         <div className="flex flex-row items-center justify-between p-5 px-10">
           <h2 className="text-2xl font-semibold tracking-tight">
-            Text behind image editor
+            Text
+            <span className="text-blue-300 italic"> and now also image </span>
+            behind image editor
           </h2>
           <div className="flex gap-4">
             <input
@@ -305,14 +356,8 @@ const Page = () => {
               ref={overlayInputRef}
               style={{ display: "none" }}
               onChange={handleOverlayFileChange}
-              accept=".png" // Preferably PNG for transparency support
+              accept=".jpg, .jpeg, .png"
             />
-            <Button onClick={handleOverlayImageUpload}>
-              <ImageIcon className="mr-2" /> Upload overlay image
-            </Button>
-            {/* <Avatar>
-                <AvatarImage src={user?.user_metadata.avatar_url} />
-              </Avatar> */}
           </div>
         </div>
         <Separator />
@@ -352,22 +397,23 @@ const Page = () => {
                     {textSet.text}
                   </div>
                 ))}
-              {overlayImage && (
+              {overlayImages.map(({ id, imageUrl, controls }) => (
                 <Image
-                  src={overlayImage}
-                  alt="Overlay"
+                  key={id}
+                  src={imageUrl}
+                  alt={`Overlay ${id}`}
                   layout="fill"
                   objectFit="contain"
                   objectPosition="center"
                   className="absolute pointer-events-none"
                   style={{
-                    top: `${overlayControls.y}%`,
-                    left: `${overlayControls.x}%`,
-                    transform: `translate(-50%, -50%) scale(${overlayControls.scale})`,
-                    opacity: overlayControls.opacity,
+                    top: `${controls.y}%`,
+                    left: `${controls.x}%`,
+                    transform: `translate(-50%, -50%) scale(${controls.scale})`,
+                    opacity: controls.opacity,
                   }}
                 />
-              )}
+              ))}
               {removedBgImageUrl && (
                 <Image
                   src={removedBgImageUrl}
@@ -380,10 +426,24 @@ const Page = () => {
               )}
             </div>
             <div className="flex flex-col w-full">
-              <Button variant={"secondary"} onClick={addNewTextSet}>
-                <PlusIcon className="mr-2" /> Add New Text Set
-              </Button>
-              <Accordion type="multiple" className="w-full mt-2">
+              <div className="flex justify-between mb-4">
+                <Button variant={"secondary"} onClick={addNewTextSet}>
+                  <PlusIcon className="mr-2" /> Add New Text Set
+                </Button>
+                <Button
+                  variant={"secondary"}
+                  onClick={handleOverlayImageUpload}
+                  disabled={isOverlayLoading}
+                >
+                  {isOverlayLoading ? (
+                    <ReloadIcon className="mr-2 animate-spin" />
+                  ) : (
+                    <ImageIcon className="mr-2" />
+                  )}
+                  {isOverlayLoading ? "Processing..." : "Upload Image Overlay"}
+                </Button>
+              </div>
+              <Accordion type="multiple" className="w-full">
                 {textSets.map((textSet) => (
                   <TextCustomizer
                     key={textSet.id}
@@ -393,12 +453,17 @@ const Page = () => {
                     duplicateTextSet={duplicateTextSet}
                   />
                 ))}
-                {overlayImage && (
+                {overlayImages.map(({ id, controls }) => (
                   <OverlayImageCustomizer
-                    controls={overlayControls}
-                    onChange={handleOverlayControlsChange}
+                    key={id}
+                    controls={controls}
+                    onChange={(newControls) =>
+                      handleOverlayControlsChange(id, newControls)
+                    }
+                    onDelete={() => deleteOverlayImage(id)}
+                    onDuplicate={() => duplicateOverlayImage(id)}
                   />
-                )}
+                ))}
               </Accordion>
               <canvas ref={canvasRef} style={{ display: "none" }} />
               <Button onClick={saveCompositeImage}>Save image</Button>
