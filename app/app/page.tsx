@@ -267,6 +267,7 @@ const Page = () => {
 
       ctx.drawImage(bgImg, 0, 0, canvas.width, canvas.height);
 
+      // Draw text sets
       textSets.forEach((textSet) => {
         ctx.save(); // Save the current state
         ctx.font = `${textSet.fontWeight} ${textSet.fontSize * 3}px ${
@@ -288,45 +289,52 @@ const Page = () => {
         ctx.restore(); // Restore the original state
       });
 
-      // Draw all overlay images
-      overlayImages.forEach(({ imageUrl, controls }) => {
-        const overlayImg = new (window as any).Image();
-        overlayImg.crossOrigin = "anonymous";
-        overlayImg.onload = () => {
-          const aspectRatio = overlayImg.width / overlayImg.height;
-          const baseWidth = canvas.width * 0.5;
-          const baseHeight = baseWidth / aspectRatio;
-          const width = baseWidth * controls.scale;
-          const height = baseHeight * controls.scale;
+      // Create a promise for each overlay image
+      const overlayPromises = overlayImages.map(({ imageUrl, controls }) => {
+        return new Promise<void>((resolve) => {
+          const overlayImg = new (window as any).Image();
+          overlayImg.crossOrigin = "anonymous";
+          overlayImg.onload = () => {
+            const aspectRatio = overlayImg.width / overlayImg.height;
+            const baseWidth = canvas.width * 0.5;
+            const baseHeight = baseWidth / aspectRatio;
+            const width = baseWidth * controls.scale;
+            const height = baseHeight * controls.scale;
 
-          const x = (canvas.width * controls.x) / 100 - width / 2;
-          const y = (canvas.height * controls.y) / 100 - height / 2;
+            const x = (canvas.width * controls.x) / 100 - width / 2;
+            const y = (canvas.height * controls.y) / 100 - height / 2;
 
-          ctx.globalAlpha = controls.opacity;
-          ctx.drawImage(overlayImg, x, y, width, height);
-          ctx.globalAlpha = 1;
-        };
-        overlayImg.src = imageUrl;
+            ctx.globalAlpha = controls.opacity;
+            ctx.drawImage(overlayImg, x, y, width, height);
+            ctx.globalAlpha = 1;
+            resolve();
+          };
+          overlayImg.src = imageUrl;
+        });
       });
 
-      if (removedBgImageUrl) {
-        const removedBgImg = new (window as any).Image();
-        removedBgImg.crossOrigin = "anonymous";
-        removedBgImg.onload = () => {
-          ctx.drawImage(removedBgImg, 0, 0, canvas.width, canvas.height);
+      // Wait for all overlay images to be drawn
+      Promise.all(overlayPromises).then(() => {
+        // Draw the removed background image last
+        if (removedBgImageUrl) {
+          const removedBgImg = new (window as any).Image();
+          removedBgImg.crossOrigin = "anonymous";
+          removedBgImg.onload = () => {
+            ctx.drawImage(removedBgImg, 0, 0, canvas.width, canvas.height);
+            triggerDownload();
+          };
+          removedBgImg.src = removedBgImageUrl;
+        } else {
           triggerDownload();
-        };
-        removedBgImg.src = removedBgImageUrl;
-      } else {
-        triggerDownload();
-      }
+        }
+      });
     };
     bgImg.src = selectedImage || "";
 
     function triggerDownload() {
       const dataUrl = canvas.toDataURL("image/png");
       const link = document.createElement("a");
-      link.download = "text-behind-image.png";
+      link.download = "composite-image.png";
       link.href = dataUrl;
       link.click();
     }
