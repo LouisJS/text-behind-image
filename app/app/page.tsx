@@ -191,39 +191,26 @@ const Page = () => {
     }
   };
 
-  const handleOverlayFileChange = async (
+  const handleOverlayFileChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (file) {
-      setIsOverlayLoading(true);
-      try {
-        const imageUrl = URL.createObjectURL(file);
-        const removedBgBlob = await removeBackground(imageUrl, {
-          output: {
-            quality: 1,
+      const imageUrl = URL.createObjectURL(file);
+      const newId = Math.max(0, ...overlayImages.map((img) => img.id)) + 1;
+      setOverlayImages((prev) => [
+        ...prev,
+        {
+          id: newId,
+          imageUrl: imageUrl,
+          controls: {
+            x: 50,
+            y: 50,
+            opacity: 1,
+            scale: 1,
           },
-        });
-        const removedBgUrl = URL.createObjectURL(removedBgBlob);
-        const newId = Math.max(0, ...overlayImages.map((img) => img.id)) + 1;
-        setOverlayImages((prev) => [
-          ...prev,
-          {
-            id: newId,
-            imageUrl: removedBgUrl,
-            controls: {
-              x: 50,
-              y: 50,
-              opacity: 1,
-              scale: 1,
-            },
-          },
-        ]);
-      } catch (error) {
-        console.error("Error removing background from overlay image:", error);
-      } finally {
-        setIsOverlayLoading(false);
-      }
+        },
+      ]);
     }
   };
 
@@ -441,14 +428,9 @@ const Page = () => {
                 <Button
                   variant={"secondary"}
                   onClick={handleOverlayImageUpload}
-                  disabled={isOverlayLoading}
                 >
-                  {isOverlayLoading ? (
-                    <ReloadIcon className="mr-2 animate-spin" />
-                  ) : (
-                    <ImageIcon className="mr-2" />
-                  )}
-                  {isOverlayLoading ? "Processing..." : "Upload Image Overlay"}
+                  <ImageIcon className="mr-2" />
+                  Upload Image Overlay
                 </Button>
               </div>
               <Accordion type="multiple" className="w-full">
